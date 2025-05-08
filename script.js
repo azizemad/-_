@@ -207,6 +207,7 @@ function updateBalance(action) {
   });
 }
 
+// دالة لإضافة الرصيد بناءً على اليوم
 function autoAddBalance() {
   db.ref("employees").once("value", snapshot => {
     snapshot.forEach(child => {
@@ -216,24 +217,29 @@ function autoAddBalance() {
 
       if (dailyAmount > 0) {
         const lastUpdateTimestamp = emp.lastBalanceUpdate || new Date().toISOString();
-        const currentTimestamp = new Date();
-        const lastUpdateDate = new Date(lastUpdateTimestamp);
+        const currentDate = new Date().toISOString().split('T')[0]; // أخذ التاريخ فقط (YYYY-MM-DD)
 
-        const timeDifference = (currentTimestamp - lastUpdateDate) / (1000 * 60); // الفرق بالدقائق
-        const addCount = Math.floor(timeDifference / 1); // نضيف المبلغ كل 5 دقائق
+        const lastUpdateDate = new Date(lastUpdateTimestamp).toISOString().split('T')[0]; // تاريخ آخر تحديث
 
-        if (addCount > 0) {
-          let newBalance = emp.balance + (dailyAmount * addCount);
-          employeeRef.update({ balance: newBalance, lastBalanceUpdate: currentTimestamp.toISOString() });
-          logActivity(`تم إضافة ${dailyAmount * addCount} إلى رصيد الموظف ${emp.name} بناءً على مرور ${addCount} دورات من 5 دقائق`);
+        if (currentDate !== lastUpdateDate) { // إذا كانت اليوم مختلف عن تاريخ آخر تحديث
+          let newBalance = emp.balance + dailyAmount;
+
+          // تحديث الرصيد وإضافة تاريخ آخر تحديث
+          employeeRef.update({
+            balance: newBalance,
+            lastBalanceUpdate: currentDate
+          }).then(() => {
+            logActivity(`تم إضافة ${dailyAmount} إلى رصيد الموظف ${emp.name} بناءً على مرور يوم كامل`);
+          });
         }
       }
     });
   });
 }
 
-// تحديد تكرار العملية كل 10 دقائق
-setInterval(autoAddBalance, 1 * 60 * 1000);
+// تحديد تكرار العملية لتحدث مرة واحدة في اليوم
+setInterval(autoAddBalance, 24 * 60 * 60 * 1000); // كل 24 ساعة
+
 
 function displayActivityLog() {
   activityLogTableBody.innerHTML = "";
