@@ -310,7 +310,7 @@ function autoAddBalance() {
 }
 
 // تشغيل الرصيد التلقائي كل 5 دقائق
-setInterval(autoAddBalance, 0.25 * 60 * 1000);
+setInterval(autoAddBalance, 1440 * 60 * 1000);
 
 window.onload = function() {
   hideAllSections();
