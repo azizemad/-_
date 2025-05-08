@@ -39,6 +39,7 @@ function hideAllSections() {
   document.getElementById("activityLogSection").classList.add("hidden");
   document.getElementById("companyRevenuesSection").classList.add("hidden");
   employeeTable.classList.add("hidden");
+  selectedEmployeeInfo.classList.add("hidden");
 }
 
 function showAddEmployee() {
@@ -88,7 +89,7 @@ function addEmployee() {
       id: id,
       name: name,
       phone: phone,
-      type: "عادي",  // النوع الافتراضي
+      type: "عادي",
       balance: 0,
       dailyAmount: dailyAmount
     }).then(() => {
@@ -110,24 +111,19 @@ function displayEmployeeList() {
       const emp = child.val();
       const row = document.createElement("tr");
 
-      // إضافة زر للتفاعل مع "type"
       const typeButton = document.createElement("button");
       typeButton.textContent = emp.type;
-      typeButton.style.backgroundColor = emp.type === "مميز" ? "red" : ""; // تلوين الزر إذا كان النوع مميزاً
-      typeButton.onclick = function() {
-        const newType = emp.type === "مميز" ? "عادي" : "مميز"; // التبديل بين مميز وعادي
+      typeButton.style.backgroundColor = emp.type === "مميز" ? "red" : "";
+      typeButton.onclick = function () {
+        const newType = emp.type === "مميز" ? "عادي" : "مميز";
         const nameCell = row.cells[0];
-        
-        // تلوين الاسم باللون الأحمر أو إرجاعه للونه الأصلي
-        nameCell.style.color = newType === "مميز" ? "red" : ""; 
+        nameCell.style.color = newType === "مميز" ? "red" : "";
 
-        // تحديث النوع في Firebase
         db.ref("employees/" + child.key).update({
           type: newType
         }).then(() => {
-          console.log("تم تحديث نوع الموظف");
-          typeButton.textContent = newType; // تغيير النص في الزر
-          typeButton.style.backgroundColor = newType === "مميز" ? "red" : ""; // تلوين الزر إذا كان مميز
+          typeButton.textContent = newType;
+          typeButton.style.backgroundColor = newType === "مميز" ? "red" : "";
         });
       };
 
@@ -136,11 +132,9 @@ function displayEmployeeList() {
         <td>${emp.balance}</td>
         <td>${emp.id}</td>
         <td>${emp.phone}</td>
-        <td></td> <!-- هنا سيتم إضافة الزر -->
+        <td></td>
         <td><button onclick="openBalanceManagement('${child.key}')">إدارة الرصيد</button></td>
       `;
-      
-      // إضافة الزر داخل الخلية المناسبة
       row.cells[4].appendChild(typeButton);
       employeeTableBody.appendChild(row);
     });
@@ -156,10 +150,9 @@ function openBalanceManagement(employeeId) {
     const emp = snapshot.val();
     selectedEmployeeName.textContent = `اسم الموظف: ${emp.name}`;
     selectedEmployeeBalance.textContent = `الرصيد الحالي: ${emp.balance}`;
+    selectedEmployeeInfo.classList.remove("hidden");
   });
-  selectedEmployeeInfo.classList.remove("hidden");
 }
-
 function updateBalance(action) {
   const amount = parseFloat(balanceChangeInput.value);
   if (isNaN(amount) || amount <= 0) {
@@ -176,13 +169,18 @@ function updateBalance(action) {
 
     if (action === "increase") {
       newBalance += amount;
-      logActivity(`تمت زيادة الرصيد للموظف ${emp.name} بمقدار ${amount}`);
+      const currentTimestamp = new Date().toISOString(); // تخزين الوقت الحالي
+      employeeRef.update({
+        balance: newBalance,
+        lastBalanceUpdate: currentTimestamp // حفظ الوقت في قاعدة البيانات
+      }).then(() => {
+        logActivity(`تمت زيادة الرصيد للموظف ${emp.name} بمقدار ${amount}`);
+      });
     } else if (action === "decrease") {
       if (newBalance >= amount) {
         newBalance -= amount;
         logActivity(`تم خصم مبلغ ${amount} من رصيد الموظف ${emp.name}`);
-        
-        // خصم المبلغ من إيرادات الشركة أيضًا
+
         companyRevenueRef.once("value", snapshot => {
           const currentRevenue = snapshot.val() || 0;
           const newRevenue = currentRevenue - amount;
@@ -209,6 +207,34 @@ function updateBalance(action) {
   });
 }
 
+function autoAddBalance() {
+  db.ref("employees").once("value", snapshot => {
+    snapshot.forEach(child => {
+      const emp = child.val();
+      const dailyAmount = emp.dailyAmount || 0;
+      const employeeRef = db.ref("employees/" + child.key);
+
+      if (dailyAmount > 0) {
+        const lastUpdateTimestamp = emp.lastBalanceUpdate || new Date().toISOString();
+        const currentTimestamp = new Date();
+        const lastUpdateDate = new Date(lastUpdateTimestamp);
+
+        const timeDifference = (currentTimestamp - lastUpdateDate) / (1000 * 60); // الفرق بالدقائق
+        const addCount = Math.floor(timeDifference / 1); // نضيف المبلغ كل 5 دقائق
+
+        if (addCount > 0) {
+          let newBalance = emp.balance + (dailyAmount * addCount);
+          employeeRef.update({ balance: newBalance, lastBalanceUpdate: currentTimestamp.toISOString() });
+          logActivity(`تم إضافة ${dailyAmount * addCount} إلى رصيد الموظف ${emp.name} بناءً على مرور ${addCount} دورات من 5 دقائق`);
+        }
+      }
+    });
+  });
+}
+
+// تحديد تكرار العملية كل 10 دقائق
+setInterval(autoAddBalance, 1 * 60 * 1000);
+
 function displayActivityLog() {
   activityLogTableBody.innerHTML = "";
   db.ref("activityLog").once("value", snapshot => {
@@ -227,16 +253,13 @@ function displayActivityLog() {
 function logActivity(activity) {
   const timestamp = new Date().toLocaleString();
   const newLogRef = db.ref("activityLog").push();
-  newLogRef.set({
-    timestamp: timestamp,
-    activity: activity
-  });
+  newLogRef.set({ timestamp: timestamp, activity: activity });
 }
 
 function displayCompanyRevenue() {
   db.ref("companyRevenue").once("value", snapshot => {
     const revenue = snapshot.val() || 0;
-    companyRevenueDisplay.textContent = `إيرادات الشركة: ${revenue}`;
+    companyRevenueDisplay.textContent = `إيرادات الشركة: ${revenue.toLocaleString()}`;
   });
 }
 
@@ -266,7 +289,7 @@ function updateCompanyRevenue(action) {
     }
 
     companyRevenueRef.set(newRevenue).then(() => {
-      companyRevenueDisplay.textContent = `إيرادات الشركة: ${newRevenue}`;
+      companyRevenueDisplay.textContent = `إيرادات الشركة: ${newRevenue.toLocaleString()}`;
       companyRevenueAmount.value = "";
     });
   });
@@ -278,11 +301,15 @@ function searchEmployee() {
 
   for (let row of rows) {
     const nameCell = row.cells[0];
+    const balanceCell = row.cells[1];
     const idCell = row.cells[2];
-    const name = nameCell.textContent.toLowerCase();
-    const id = idCell.textContent;
+    const phoneCell = row.cells[3];
 
-    if (name.includes(searchText) || id.includes(searchText)) {
+    const name = nameCell.textContent.toLowerCase();
+    const id = idCell.textContent.toLowerCase();
+    const phone = phoneCell.textContent.toLowerCase();
+
+    if (name.includes(searchText) || id.includes(searchText) || phone.includes(searchText)) {
       row.style.display = "";
     } else {
       row.style.display = "none";
@@ -290,14 +317,14 @@ function searchEmployee() {
   }
 }
 
-// إضافة الرصيد التلقائي كل 5 دقائق
+
 function autoAddBalance() {
   db.ref("employees").once("value", snapshot => {
     snapshot.forEach(child => {
       const emp = child.val();
       const dailyAmount = emp.dailyAmount || 0;
       const employeeRef = db.ref("employees/" + child.key);
-      
+
       if (dailyAmount > 0) {
         employeeRef.once("value", snapshot => {
           const newBalance = snapshot.val().balance + dailyAmount;
@@ -309,10 +336,9 @@ function autoAddBalance() {
   });
 }
 
-// تشغيل الرصيد التلقائي كل 5 دقائق
-setInterval(autoAddBalance, 1440 * 60 * 1000);
+setInterval(autoAddBalance, 10 * 60 * 1000);
 
-window.onload = function() {
+window.onload = function () {
   hideAllSections();
   showEmployeeList();
 };
